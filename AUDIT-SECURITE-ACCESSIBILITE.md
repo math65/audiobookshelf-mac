@@ -6,7 +6,8 @@
 - **Méthode :**
   - lecture de tout le code, en plusieurs audits parallèles (réseau, système, fichiers et données du serveur, interface et historique git, VoiceOver) ;
   - vérification à la main, dans le code, des trouvailles les plus graves ;
-  - recherche dans la documentation Apple (API d'accessibilité, recommandations de design, sessions WWDC, critères des « étiquettes d'accessibilité » de l'App Store).
+  - recherche dans la documentation Apple (API d'accessibilité, recommandations de design, sessions WWDC, critères des « étiquettes d'accessibilité » de l'App Store) ;
+  - comparaison avec le serveur et l'app web officiels, avec tes propres projets et avec AudioBooth, tous lus sans être modifiés.
 - **Limite :** l'environnement d'audit tourne sous Linux, sans Mac ni compilateur Swift. Rien n'a été lancé. Les points marqués **(à confirmer sur Mac)** dépendent d'un comportement de macOS que je n'ai pas pu tester.
 - **Aucune modification du code de l'app** n'a été faite. Ce fichier est le seul ajout.
 
@@ -478,10 +479,164 @@ Chemins utilisés : `Srv` = `server/`, `Web` = `client/` du dépôt officiel.
 | **Ce que seule l'app Mac a** : téléchargements hors ligne, rester éveillé, mini-lecteur, adresse locale, lien `audiobookshelf://`, touches média, menu du Dock | — | **Garder** (en corrigeant la sécurité : S1, S3, S6). |
 | **Accessibilité du web** | Le web a 104 `aria-label`, de vraies fenêtres modales (`role="dialog"`, focus déplacé, Échap), et de vrais menus ARIA. Mais sa barre de progression est inaccessible, ses cartes n'ont pas de nom, et le ticket #2268 « Improve accessibility for screen readers » est toujours ouvert. | **Faire mieux qu'ABS.** Le web n'est pas un bon modèle d'accessibilité. |
 
-<!-- PROJETS -->
+### 3.3 Comparaison avec tes propres projets
+
+**Projets lus, sans rien y modifier :**
+
+- **Tes apps Mac et iOS :** DSM Access, tt-Accessible, NVDA Remote for Mac, BrailliantConnect et reaperaccessible-ios.
+- **Tes apps Windows**, pour tes habitudes seulement : DownAccess, MarkdownAccess, Accessible Media Converter et Accessible Media Editor.
+
+**Ce qui définit tes projets :**
+
+- **L'accessibilité passe avant tout.** « L'accessibilité fait partie de la correction fonctionnelle, pas d'une passe finale » (`dsmaccess/CLAUDE.md:8-10`).
+- **Les annonces passent par un seul outil central.**
+- **Les contrôles sont natifs.**
+- **Les vraies fenêtres modales** s'ouvrent avec `.sheet(item:)`.
+- **Le focus est géré** avec `@AccessibilityFocusState`.
+- **Les titres de section sont marqués comme tels :** 67 dans DSM Access.
+- **Les durées sont formulées pour être lues à voix haute.**
+- **Le français est toujours inclus**, et un test vérifie qu'aucune traduction ne manque.
+- **La distribution est soignée :** Developer ID, hardened runtime, notarisation, sans `--deep`.
+- **La sécurité réseau est stricte :** seulement `NSAllowsLocalNetworking`, et pour les certificats auto-signés, l'empreinte que tu as approuvée est gardée dans le Trousseau.
+
+L'app Mac est loin de tout ça.
+
+| # | Sujet | audiobookshelf-mac | Ta pratique (fichier de référence) | Décision |
+|---|---|---|---|---|
+| 1 | **Annonces** | Aucune | `VoiceOver.announce(_:category:priority:)` avec un délai de 100 ms et des regroupements (`dsmaccess/Support/VoiceOver.swift:12-114`). Voix de secours quand l'app est en arrière-plan (`nvdaremote-mac/App/AppModel.swift:791-798`). | **Reprendre ta pratique**, branchée dans `AppModel.toast()` |
+| 2 | **Échec d'une action que tu as demandée** | Toast de 4 s | Une alerte qui reste affichée (`dsmaccess/CLAUDE.md:197-204`) | **Reprendre ta pratique** : échec de lecture, de connexion ou de téléchargement |
+| 3 | **Événements en arrière-plan** (minuterie, fin de livre) | Toast | Un son au premier plan, une notification en arrière-plan (`dsmaccess/Support/OperationNotifier.swift:61-80`) | **Reprendre ta pratique** : une app d'écoute tourne souvent en arrière-plan |
+| 4 | **Barre de progression** | Formes + glisser, invisible pour VoiceOver | `MediaPlaybackPositionControl` : rôle slider, ±5 s, Début, Fin et Page, `valueChanged` seulement quand le focus est dessus (`ttaccessible/.../AppKit/MediaPlaybackPositionControl.swift:12-268`). Ou le `Slider` de `ReplaysView.swift:351-356` (« 3 minutes 12 sur 58 minutes ») | **Reprendre ta pratique** : la version tt-Accessible est prête à réutiliser |
+| 5 | **Éléments cliquables** | 14 `onTapGesture` | Des `Button` natifs | **Reprendre ta pratique** |
+| 6 | **Cartes de livres** | 3 à 6 arrêts, actions au survol seulement | `Button`, `children: .ignore`, libellé composé, indice, actions nommées, menu contextuel (`reaperaccessible-ios/ReaperAccessible/Replays/ReplaysView.swift:124-169`) | **Reprendre ta pratique** |
+| 7 | **Listes de livres** | Grille `LazyVGrid` | Tableaux `Table` ou `NSTableView` pour les données (`dsmaccess/CLAUDE.md:159-165`) | **À décider par toi** : garder la grille, et ajouter une vue en liste ou en tableau ? |
+| 8 | **Fenêtres modales** | Dessinées par-dessus la fenêtre | `.sheet(item:)`, titre marqué comme titre, focus et annonce à l'ouverture, raccourcis Annuler et OK (`dsmaccess/Views/NameEntrySheet.swift:43-75`) | **Reprendre ta pratique** |
+| 9 | **Échap** | Ferme le lecteur | « Un Échap égaré ne doit jamais fermer la fenêtre de session » (`ttaccessible/.../EscapeClosableWindow.swift:12-14`) | **Reprendre ta pratique** |
+| 10 | **Flèches** | Toujours prises | Surveillance du clavier seulement si l'app est active et hors d'un champ texte, et les touches de liste restent aux listes (`ttaccessible/.../ChannelMixerKeyboardController.swift:56-100`) | **Reprendre ta pratique.** On garde Espace = lecture/pause. |
+| 11 | **Titres de section** | 0 | Partout (`ttaccessible/AGENTS.md:364`) | **Reprendre ta pratique** |
+| 12 | **Champs sans nom** | `TextField("")`, `Toggle("")`, `Picker("")` | Chaque contrôle a un nom | **Reprendre ta pratique** |
+| 13 | **Barre de titre transparente et titre masqué** (`AppDelegate.swift:71-73`) | Oui | « Ça tue la navigation VoiceOver dans la barre d'outils » (`ttaccessible/AGENTS.md:324`) | **Reprendre ta pratique**, au moins donner un titre à la fenêtre |
+| 14 | **Langue** | Anglais seulement, avec le mécanisme `L.s` | Français et anglais obligatoires, avec un test (`dsmaccess/dsmaccessTests/LocalizationCatalogTests.swift`). BrailliantConnect a déjà une table maison `L.t()` pour un paquet SwiftPM | **Garder `L.s`** (mêmes clés qu'ABS), **ajouter `fr.json`** et un test des clés manquantes |
+| 15 | **Durées lues** | « 1:05:32 », « hr/min » en anglais | `SpokenTime` : « 1:05:32 lu par VoiceOver devient une heure de la journée » (`ReaperAccessible/Replays/SpokenTime.swift:7-49`) ; `Duration.formatted(.units(width: .wide))` | **Reprendre ta pratique** |
+| 16 | **ATS** | `NSAllowsArbitraryLoads` | `NSAllowsLocalNetworking` seulement, et le `http` est un choix explicite de l'utilisateur (`dsmaccess/Networking/DSMEndpoint.swift:12-25`) | **Reprendre ta pratique** |
+| 17 | **Certificats auto-signés** | Possibles seulement parce que l'ATS est grand ouvert | Empreinte approuvée gardée dans le Trousseau (`dsmaccess/Networking/ServerTrustDelegate.swift:15-119`) | **Reprendre ta pratique** |
+| 18 | **Jetons** | Fichier JSON avec les droits 0600 | Trousseau (`dsmaccess/Session/CredentialStore.swift:42-67`) | **Reprendre ta pratique** dès que l'app sera signée avec un Developer ID |
+| 19 | **Outil pour le Trousseau** | Distingue « verrouillé » de « absent » | Renvoie seulement `nil` | **Garder la version de l'app Mac**, qui est un peu meilleure |
+| 20 | **Signature** | Ad hoc, `--deep`, sans hardened runtime | Developer ID « Mathieu Martin (633EG76YX5) », `--options runtime --timestamp`, notarisation, refus de `get-task-allow` (`ttaccessible/build.sh:77-93`, `brailliantconnect/tools/make-dist.sh:198-207`) | **Reprendre ta pratique** |
+| 21 | **Sandbox** | Aucune | DSM Access et tt-Accessible sont en sandbox. NVDA Remote ne l'est pas, et la raison est écrite | **Écrire pourquoi il n'y en a pas** : `sudoers`/`pmset` pour le capot fermé l'empêchent |
+| 22 | **Compilation** | SwiftPM, sans Xcode | Projet Xcode pour les apps Mac | **Garder pour l'instant.** Passer à Xcode, c'est à toi de décider : ça débloquerait `.xcstrings` et les audits d'accessibilité automatiques |
+| 23 | **Tests** | Uniquement la logique de base (ABSCore) | Swift Testing, plus des tests d'interface avec `performAccessibilityAudit` | **Ajouter** au moins un test des traductions |
+
+**Code prêt à reprendre de tes projets :**
+
+- **Annonces :** `dsmaccess/Support/VoiceOver.swift`
+- **Barre de progression :** `ttaccessible/.../AppKit/MediaPlaybackPositionControl.swift` et `AccessibleSlider.swift`
+- **Durées lues :** `ReaperAccessible/Replays/SpokenTime.swift`
+- **Cartes :** `ReplaysView.swift:124-169`, qui montre aussi l'ordre des actions (VoiceOver les liste à l'envers : `:61-94`)
+- **Fenêtre modale :** `dsmaccess/Views/NameEntrySheet.swift`
+- **Échap :** `EscapeClosableWindow.swift`
+- **Clavier :** `ChannelMixerKeyboardController.swift`
+- **Menu branché sur la vue active :** `dsmaccess/Support/AppCommands.swift`
+- **Progression :** `dsmaccess/Views/DSMUpdateView.swift:98-101`
+- **Test des traductions :** `LocalizationCatalogTests.swift`
+- **Certificats :** `ServerTrustDelegate.swift`
+- **Référence d'accessibilité à copier dans `docs/` :** `dsmaccess/docs/accessibility.md` (600 lignes)
+
+### 3.4 Comparaison avec AudioBooth (ton fork)
+
+**Ce qu'est AudioBooth :**
+
+- un autre client Audiobookshelf, en Swift, pour iOS 17+ et watchOS, qui compile aussi pour Mac Catalyst ;
+- son auteur est Jeremy Grenier : ce n'est **pas** ton code, donc pas tes conventions.
+
+**AudioBooth ne règle pas les mêmes problèmes de sécurité** :
+
+- lui non plus ne vérifie pas que l'appareil local est bien ton serveur ;
+- il a lui aussi des plantages `Int(Double)` et un chemin de téléchargement non vérifié (`bookID`).
+
+**Il est en avance** sur les modes de connexion, le rangement des données par serveur, certains points VoiceOver et le français.
+
+**L'app Mac est meilleure** sur la synchronisation et la gestion des jetons.
+
+| Sujet | AudioBooth | Décision pour l'app Mac |
+|---|---|---|
+| **Modes de connexion** | Appelle `/status`, puis propose mot de passe, **OIDC avec PKCE** ou **clé d'API** (`ServerViewModel.swift:382-437`, `OIDCAuthenticationManager.swift`). | **Reprendre d'AudioBooth**, sans reprendre son journal qui enregistre le code OIDC et les cookies. |
+| **En-têtes personnalisés par serveur** (Cloudflare Access, Authelia) | Oui (`AuthenticationService.swift:231-246`). | **Reprendre d'AudioBooth.** |
+| **Renouvellement du jeton** | Anticipé : 60 s avant l'expiration, avec des nouvelles tentatives de plus en plus espacées (`CredentialsActor.swift:14-85`). | **Reprendre d'AudioBooth**, et **garder** en plus la nouvelle tentative sur 401 de l'app Mac. |
+| **Mot de passe enregistré** | Aucun. | **Garder l'app Mac** (reconnexion silencieuse), mais uniquement vers l'adresse publique en https. |
+| **Déconnexion** | Locale seulement : le jeton reste valable sur le serveur. | **Garder l'app Mac**, qui révoque le jeton sur le serveur. |
+| **Jeton dans l'URL** | `?token=` pour les livres numériques et les téléchargements de la montre. | **Garder l'app Mac** : jamais de jeton dans une URL. |
+| **Lien profond** | `audiobooth://connection/…` importe un serveur et **bascule dessus sans demander**. | **Garder l'app Mac** : aucune connexion par lien. |
+| **Adresse secondaire (réseau local)** | Facultative, choisie par l'utilisateur. Vérifiée *avec* le jeton (`/api/authorize`). Bascule seulement sur une erreur réseau. | **Reprendre l'idée** : adresse locale facultative, et bascule seulement sur une erreur réseau. **Ajouter** une vérification *sans* identifiants : comparer l'empreinte d'une couverture connue, qui est servie sans authentification, entre l'adresse publique et l'adresse locale. C'est une proposition, à tester. |
+| **Rangement par serveur** | Un **UUID créé localement** par serveur (`Server.swift:90`). | **Reprendre d'AudioBooth** : ça corrige S2. |
+| **Nom des fichiers audio** | `<index><extension>`, avec une extension choisie dans une liste autorisée (`DownloadManager.swift:597`). | **Reprendre d'AudioBooth** (corrige S3), en gardant les dossiers Auteur / Titre lisibles. |
+| **Synchronisation** | Toutes les 20 s environ. Peut sauter la synchro à la pause. Marque un livre terminé quand il reste **60 s ou moins**. | **Garder l'app Mac**, fidèle à ABS. AudioBooth peut marquer un livre terminé trop tôt. |
+| **Synchro en temps réel entre appareils** | Pas de socket. La position la plus avancée gagne. | **Garder l'app Mac.** |
+| **Fermer la session après 10 min de pause** | Oui, avec de nouvelles tentatives. | **Reprendre d'AudioBooth.** |
+| **Sessions hors ligne coupées par jour** | Oui. | **Reprendre d'AudioBooth**, parce que les statistiques sont comptées par jour. |
+| **Signets en attente hors ligne** | Oui (`BookmarkSyncQueue.swift`). | **Reprendre d'AudioBooth.** |
+| **Minuterie** | « Fin dans N chapitres », alarme à une heure donnée. | **Reprendre d'AudioBooth** : « fin dans N chapitres ». |
+| **Raccourcis (App Intents)** : minuterie, saut, signet | Oui. | **Reprendre d'AudioBooth**, pour l'app Raccourcis de macOS. |
+| **VoiceOver** | 38 `accessibilityLabel`, 24 `accessibilityHidden`, 10 éléments regroupés, 8 traits, 4 `accessibilityAdjustableAction`. Mais **sa barre de progression n'est pas accessible non plus**, et il n'a aucune annonce. | **Reprendre d'AudioBooth** : le modèle de réglage au clavier de `TickSlider.swift:58-65` et `PlayerPreferencesView.swift:203-212`, la liste des chapitres en boutons (`ChapterPickerSheet.swift`), le badge de la minuterie avec un libellé complet, et les durées en toutes lettres (`TimeInterval+Formatting.swift:12-17`). Pour tout le reste, **tes propres projets sont un meilleur modèle** (voir 3.3). |
+| **Français** | 665 textes sur 665 (`Localizable.xcstrings`). | **Préférer le `fr.json` officiel d'ABS**, qui utilise les mêmes clés que l'app Mac. |
+| **Journal des erreurs de décodage** | Enregistre où la lecture a échoué (le chemin du champ). | **Reprendre d'AudioBooth.** |
 
 ---
 
 ## 4. Ordre de correction conseillé
 
-<!-- PRIORITES -->
+### Étape 1 : sécurité urgente (petits correctifs, gros effet)
+
+1. **S1.** Connexion, renouvellement, reconnexion et déconnexion **uniquement vers l'adresse publique**. Adresse locale facultative, qui ne reçoit que le jeton d'accès et l'audio. Même chose pour les téléchargements.
+2. **S2.** Nommer le dossier de cache avec un UUID local (comme AudioBooth), jamais avec l'identifiant envoyé par le serveur.
+3. **S3.** Porter `sanitizeFilename` d'ABS. Nommer les pistes `<index>.<extension autorisée>`. Vérifier que chaque chemin reste dans le dossier. Ne jamais effacer un dossier à l'endroit où arrive un fichier.
+4. **S5.** Une fonction `safeInt`, des additions qui ne débordent pas, et un `LossyArray` qui avance toujours.
+5. **S6.** `route`, `seek` et `playitem` réservés au mode développement. Valeurs des liens bornées.
+6. **Repli hors ligne** seulement sur une vraie erreur réseau. **403 et 404** définitifs pour les téléchargements.
+
+### Étape 2 : accessibilité VoiceOver, les blocages
+
+7. **Français :** copier `fr.json` d'ABS, choisir selon la langue du système, remplacer les ~90 textes écrits en dur, déclarer `CFBundleLocalizations`, et ajouter un test des clés.
+8. **A1 et A6 :** de vrais `Button` partout. Des cartes lues en un seul élément, avec des actions nommées (le modèle de `ReplaysView.swift`).
+9. **A2 :** la barre de progression accessible (le `MediaPlaybackPositionControl` de tt-Accessible). Commandes « Aller à… » et « Dire la position ».
+10. **A3 :** chapitres, signets, minuterie, file d'attente et réglages dans de vraies `.sheet`, avec focus, titre et Échap (le modèle de `NameEntrySheet.swift`).
+11. **A5 :** un outil d'annonce central (`VoiceOver.swift` de DSM Access), branché sur les toasts. Des alertes pour les échecs des actions que tu as demandées.
+12. **A4 :** Échap ne ferme plus le lecteur. Les flèches ne sont plus prises quand une liste a le focus. **Espace reste lecture/pause partout.**
+
+### Étape 3 : accessibilité, le confort
+
+13. **A7** titres de section, **A8** barre du lecteur, **A9** champs de formulaire, **A10** changement de page, **A11** chapitres (avec un rotor), **A12** noms des icônes, **A15** raccourcis qui parlent, **A16** menu complet.
+14. Durées en toutes lettres (`SpokenTime`, `Duration.formatted`). Contrastes (`gray500` → `gray400`, toasts plus foncés). Titre de fenêtre visible.
+15. Confirmation avant « Marquer comme terminé » et « Réinitialiser la progression », comme ABS.
+
+### Étape 4 : sécurité, le reste
+
+16. Retirer `NSAllowsArbitraryLoads`. Prévenir en cas de `http`. Épingler les certificats auto-signés que tu as acceptés (`ServerTrustDelegate.swift`).
+17. Signature Developer ID avec `--options runtime --timestamp`, sans `--deep`, et notarisation. Ensuite, jetons dans le Trousseau.
+18. `urlCache = nil` sur l'API. Déconnexion complète (images, file d'envoi hors ligne). Connexion de test réservée à `#if DEBUG`. Règle `sudoers` écrite avec le numéro d'utilisateur.
+19. `user_session_closed` : ignorer les fermetures demandées par l'app elle-même. File d'envoi hors ligne : retirer les sessions refusées.
+
+### Étape 5 : fonctions (voir 3.2 et 3.4)
+
+20. Menu de filtres, tri des séries, réglages de la minuterie automatique, « fin dans N chapitres », `/status` avec OIDC et clé d'API, en-têtes personnalisés, fermeture de session après 10 min de pause, raccourcis pour l'app Raccourcis de macOS.
+21. **Masquer les bibliothèques de podcasts.** Supprimer ou implémenter les réglages morts.
+
+### Pour ton fork (identité)
+
+- **Changer le nom interne de l'app :** remplacer `com.arturgrochau.audiobookshelf-mac` par ton propre identifiant.
+- **Mettre à jour les liens :** README, `SECURITY.md` et modèles de tickets pointent encore vers l'auteur original.
+- **L'identité de signature :** `build.sh` utilise celle de l'auteur ; mets la tienne.
+- **Licence GPL-3.0 :** respecter ses obligations si tu distribues l'app.
+
+---
+
+## Annexe : ce qui n'a pas pu être vérifié ici
+
+Faute de Mac dans l'environnement d'audit, ces points sont à tester :
+
+- les chemins avec `..` pour S2 et S3, et les protections TCC de macOS ;
+- la boucle infinie de `LossyArray` ;
+- la mise en cache de `URLCache` (S7) ;
+- ce que VoiceOver lit exactement (noms d'icônes, « 12m », coches invisibles) ;
+- le comportement réel de `.isModal` sur les fenêtres dessinées par-dessus ;
+- la relance de l'ancien livre après `user_session_closed`.
