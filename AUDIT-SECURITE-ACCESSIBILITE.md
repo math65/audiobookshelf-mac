@@ -40,7 +40,7 @@ Les 3 défauts les plus graves :
 - ouvrir un livre au clavier est impossible, et avec VoiceOver ce n'est pas garanti ;
 - la barre de progression est invisible pour VoiceOver ;
 - les chapitres, les signets et la minuterie sont inutilisables ;
-- la barre d'espace est « volée » au bouton qui a le focus.
+- Échap ferme le lecteur par erreur et les flèches changent le volume sans rien dire.
 
 La bonne nouvelle : les commandes du menu, les touches média et le Centre de contrôle marchent bien. On peut donc déjà piloter la lecture sans regarder l'écran.
 
@@ -259,17 +259,14 @@ En Swift, convertir en entier un nombre décimal énorme, infini ou « NaN » fa
     - `@AccessibilityFocusState` pour placer le focus sur le titre ;
     - `.accessibilityAction(.escape)` pour fermer avec Échap.
 
-**A4. Les raccourcis globaux « volent » Espace et les flèches.**
+**A4. Échap ferme le lecteur, et les flèches sont prises en permanence.**
 - **Où :** `AppDelegate.swift:147-202`
-- **Effet :**
-  - Dès qu'un livre est chargé, Espace lance lecture/pause au lieu d'activer le bouton qui a le focus.
-  - Les flèches changent le volume sans rien dire.
-  - **Échap ferme le lecteur** (`:170-173`).
-  - Les commandes propres à VoiceOver (Ctrl-Option) ne sont pas touchées, mais l'accès clavier complet est cassé.
-- **Correctif :**
-  - Supprimer « Échap ferme le lecteur ».
-  - Laisser passer Espace et les flèches quand un contrôle a le focus.
-  - À terme : utiliser `.onKeyPress` au niveau de la page, et mettre toutes les actions dans le menu (voir A8).
+- **Choix du propriétaire, à garder :** **Espace = lecture/pause partout.** C'est sans gêne pour VoiceOver, qui active les boutons avec VO-Espace (Ctrl-Option-Espace), une touche que l'app ne touche pas.
+- **Le seul coût :** avec l'accès clavier complet *sans* VoiceOver, la barre d'espace seule n'active plus le bouton qui a le focus. C'est un compromis accepté.
+- **Ce qui reste à corriger :**
+  - **Échap ferme le lecteur** (`:170-173`) et arrête la session. On appuie souvent sur Échap pour sortir de quelque chose, donc c'est facile à déclencher par erreur. → Supprimer ce comportement, ou demander confirmation.
+  - **Les flèches ↑ et ↓ changent le volume sans rien dire,** même quand une liste ou un menu a le focus. → Les laisser passer quand un contrôle a le focus, et annoncer le volume (voir A15).
+  - **Les touches S, A, X et Z** : elles pourraient gêner la sélection par lettre dans les listes. → À rendre désactivables dans les réglages (à confirmer à l'usage).
 
 ### Majeur
 
