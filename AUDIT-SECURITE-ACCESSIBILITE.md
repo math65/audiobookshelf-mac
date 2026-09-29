@@ -413,7 +413,72 @@ En Swift, convertir en entier un nombre décimal énorme, infini ou « NaN » fa
 
 ## 3. Comparaison avec Audiobookshelf officiel (v2.37.1)
 
-<!-- COMPARAISON -->
+Pour chaque différence, une décision :
+
+- **Reprendre d'ABS** : l'app Mac doit s'aligner sur l'officiel.
+- **Garder** : l'app Mac fait aussi bien ou mieux.
+- **Ajouter** : il manque une fonction à l'app Mac.
+- **Inutile** : pas nécessaire pour une app d'écoute.
+
+Chemins utilisés : `Srv` = `server/`, `Web` = `client/` du dépôt officiel.
+
+### 3.1 Échanges avec le serveur
+
+| Sujet | Différence | Décision |
+|---|---|---|
+| **Adresse locale** (`ServerRouter.swift`, `APIClient.swift`) | Le serveur n'a aucun moyen de prouver son identité sans connexion : `/ping` et `/status` ne renvoient rien d'unique (`Srv/Server.js:368-388`). L'app se fie donc à n'importe quel appareil qui répond (voir S1). | **Reprendre d'ABS** (comme l'app web, qui n'a qu'une adresse) : connexion, renouvellement et déconnexion **toujours vers l'adresse publique en https**. En local, seulement le jeton d'accès (valable 1 h) et l'audio. |
+| **`/status` jamais appelé avant la connexion** (`Endpoints.swift:7`) | L'app web vérifie les méthodes de connexion. Les jetons exigent le serveur 2.26 ou plus, et le délai de grâce du renouvellement le 2.35 ou plus (`Srv/migrations`). | **Reprendre d'ABS** : appeler `/status` et afficher un message clair pour un serveur trop ancien ou en OIDC seulement. |
+| **Jetons** : accès 1 h, renouvellement 30 jours, rotation avec délai de grâce de 10 min (`Srv/auth/TokenManager.js:17-21, 210-269`) | Un seul renouvellement à la fois, sauvegardé avant utilisation, comme le serveur l'attend. Le commentaire `AppModel.swift:100` dit à tort qu'une réutilisation « détruit la session » : elle échoue seulement. | **Garder** (corriger le commentaire). |
+| **Ancien jeton `user.token`**, qui n'expire jamais (`Srv/models/User.js:617`) | L'app le retire avant de garder quoi que ce soit (`AppModel.swift:214-221`). | **Garder.** C'est une faiblesse du serveur. |
+| **Limite de connexions** : 40 requêtes par 10 min et par IP, partagée entre `/login` et `/auth/refresh` (`Srv/utils/rateLimiterFactory.js`) | Un téléchargement refusé (401) relance le renouvellement sans vérifier si le jeton a déjà changé (`DownloadManager.swift:320-336`). 3 téléchargements × 5 essais peuvent épuiser la limite. | **Reprendre d'ABS** : même vérification que `APIClient.swift:164`. |
+| **Mot de passe gardé** pour la reconnexion silencieuse | Le serveur n'en a pas besoin : le jeton de renouvellement dure 30 jours et se prolonge à chaque usage. | **À rendre facultatif**, et ne jamais l'envoyer sur l'adresse locale. |
+| **`POST /api/items/:id/play`** (`PlayerModel.swift:176-213`) | Mêmes champs que `Web/players/PlayerHandler.js:182-200`. | **Garder.** Détail : ajouter `audio/x-caf` aux formats acceptés. |
+| **Sessions transcodées** | Le serveur redirige `/track/1` vers du HLS, et l'app suit la redirection. | **Reprendre d'ABS** : utiliser `contentUrl` quand `playMethod == 2`, comme l'app web (à vérifier : se déplacer dans le livre pendant un transcodage). |
+| **Synchronisation** : 20 s la première fois, puis toutes les 10 s | Identique à l'app web. En plus, l'app Mac synchronise à la pause, et passe à 60 s en mode économie d'énergie. Le serveur ne vérifie rien (`Srv/objects/PlaybackSession.js:238`). | **Garder** : l'app Mac est meilleure, et l'app web perd jusqu'à 10 s à chaque pause. |
+| **`user_session_closed`** (`PlayerModel.swift:745-750`) | Le serveur envoie cet événement à *chaque* fermeture de session, y compris celles que l'app demande elle-même (`Srv/managers/PlaybackSessionManager.js:429`). L'app croit alors à une session perdue et en rouvre une, ce qui peut relancer l'ancien livre. L'app web, elle, remet simplement le lecteur à zéro. | **Reprendre d'ABS** : ignorer les fermetures demandées par l'app elle-même (bug à confirmer sur Mac). |
+| **Repli hors ligne** (`PlayerModel.swift:150`) | *N'importe quelle* erreur, y compris 401, 403 et 404, fait basculer vers une session locale (vérifié). Le serveur ne contrôle pas l'accès dans `/api/session/local-all`, donc un utilisateur privé d'accès peut continuer à écrire sa progression. | **Reprendre d'ABS** : basculer hors ligne seulement sur une vraie erreur réseau. |
+| **File d'envoi hors ligne** (`LocalSessionStore.swift:32-49`) | Une session refusée par le serveur (livre ou bibliothèque introuvable) reste dans la file et est renvoyée à chaque fois. | **Corriger** : retirer ces sessions de la file. |
+| **Sessions hors ligne** renvoyées avec des totaux qui grandissent | Le serveur *remplace* les valeurs pour un même identifiant, donc rien n'est compté deux fois. | **Garder.** |
+| **Socket.IO** : les étapes de connexion (`0`, `40`, `auth`, `init`) | Conforme. La surveillance de 45 s correspond exactement à ping + délai du serveur. | **Garder.** |
+| **Téléchargement : erreur 403** | Réessayée 5 fois (`DownloadManager.swift:420-429`). | **Reprendre d'ABS** : considérer 403 et 404 comme définitifs. |
+| **Téléchargement : identifiant de fichier** | Déduit de la fin de `contentUrl`. Le serveur fournit directement `track.ino`, un nombre (`Srv/models/Book.js:293`). | **Reprendre d'ABS** : lire `ino` et vérifier que ce sont des chiffres (`^\d+$`). |
+| **Noms de fichiers** | La fonction `clean()` de l'app Mac est bien plus faible que `sanitizeFilename` du serveur (`Srv/utils/fileUtils.js:360`). Le serveur refuse les noms faits uniquement de points, retire les caractères de contrôle et coupe en octets en gardant l'extension. Il ne nettoie **pas** les noms d'auteur (`Srv/controllers/AuthorController.js`). | **Reprendre d'ABS** : porter `sanitizeFilename` en Swift (voir S3). |
+| **Identifiants** | Le vrai serveur n'utilise que des UUID v4 (`Srv/models/User.js:193`) et vérifie leur format (`Srv/utils/index.js:249`). | **Reprendre d'ABS** : vérifier le format UUID au décodage (voir S2). |
+| **Identifiants de progression inventés** (`local-<id>`, UUID aléatoire : `PlayerModel.swift:578`, `ItemActions.swift:260`) | Réinitialiser ou masquer une progression avec un faux identifiant donne un 404 et un message d'erreur. | **Corriger** : récupérer d'abord la vraie progression. |
+| **Couvertures sans connexion** | Le serveur les autorise (`Srv/Auth.js:21, 36-38`). | **Garder.** |
+| **Schéma `audiobookshelf://`** | L'app iOS officielle utilise `audiobookshelf://oauth` pour sa connexion OIDC. Les deux entrent en conflit si l'app iOS tourne sur un Mac Apple Silicon. Le risque est faible, car l'app Mac ignore `oauth`. | **Garder**, ou changer de schéma. |
+
+### 3.2 Application web officielle : fonctions et comportements
+
+**Déjà identique, rien à changer :**
+- chapitre précédent (règle des 3 s), chapitre suivant, file d'attente ;
+- étagères de l'accueil, tris de la bibliothèque, tailles de couverture ;
+- couleurs (copie exacte du thème web) ;
+- `en-us.json`, identique octet pour octet.
+
+| Sujet | Différence | Décision |
+|---|---|---|
+| **Espace, ←/→, ↑/↓, M, L, Maj+↑/↓** | Identiques au web. L'app Mac ajoute ⌥←/→, ⌘←/→, ⌘1-7, ⌘D et ⌘⇧M. | **Garder** (Espace partout : ton choix). |
+| **Échap** | Le web aussi ferme le lecteur avec Échap. | **Ne pas reprendre d'ABS ici** : supprimer ce comportement (voir A4). |
+| **S, A, X, Z** (vitesse) | N'existent pas dans le web. | **Garder, mais désactivables.** |
+| **Sauts** (10, 15, 30, 60, 120, 300 s) et **vitesse** (0,5 à 10) | Identiques au web. Les préréglages de vitesse diffèrent : 1 / 1,2 / 1,5 / 1,75 / 2 dans le popover, mais 0,5 / 1 / 1,2 / 1,5 / 2 dans le menu et dans le web. | **Reprendre d'ABS** : une seule liste partout. |
+| **Minuterie** | Mêmes préréglages. L'app Mac ajoute les fonctions de l'app mobile : décompte seulement pendant la lecture, fondu, retour en arrière, réarmement, son. | **Garder.** |
+| **Minuterie automatique, son, retour en arrière auto** | Codés, mais **aucun réglage visible** (`AudiobookshelfApp.swift:109-123`). | **Ajouter** les réglages. |
+| **Réglages enregistrés mais jamais utilisés** | `showMenuBarExtra`, `controlPort`, `hotkeys`, `pauseOnHeadphonesDisconnect`, `collapseSeries`, `seriesSortBy`… | **Implémenter ou supprimer.** |
+| **Chapitre en cours** | Le web affiche « chapitre (3 sur 12) » et le pourcentage. L'app Mac n'affiche que le titre du chapitre. | **Reprendre d'ABS**, au moins dans la valeur lue par VoiceOver. |
+| **Marquer comme terminé, réinitialiser la progression** | Le web **demande confirmation**. L'app Mac, non. | **Reprendre d'ABS** : c'est facile à déclencher par erreur avec VoiceOver. |
+| **Filtres de bibliothèque** | Le web a un menu de filtres (Progression › Pas commencé / En cours / Terminé…). Dans l'app Mac, toute la logique existe (`LibraryQuery.swift`), mais aucun menu. | **Ajouter** : très utile, et le code est déjà là. |
+| **Tri des séries et des auteurs, regrouper les séries** | Absents de l'app Mac. | **Ajouter** (priorité moyenne à basse). |
+| **Ajouter à une liste de lecture, retirer une série de « Continuer la série »** | Les appels à l'API existent mais ne sont pas branchés. | **Ajouter.** |
+| **Description** | Le web affiche le HTML nettoyé. L'app Mac retire toutes les balises. | **Garder le texte simple** (il se lit bien avec VoiceOver), mais ajouter des puces « • » pour les listes. |
+| **Date au format américain, « left », « Resume »** | Le web utilise le format de date du serveur et des textes traduits. | **Reprendre d'ABS.** |
+| **Langues** | Le web propose 33 langues, dont un **`fr.json` complet (1 167 clés sur 1 167, vérifié)**, choisies par utilisateur, et règle la langue de la page pour les lecteurs d'écran. L'app Mac est en anglais uniquement, avec environ 90 textes écrits en dur. | **Reprendre d'ABS** (priorité n°1 pour toi) : copier `fr.json`, choisir la langue selon le système, retomber sur l'anglais si une clé manque, et déclarer `CFBundleLocalizations`. |
+| **Podcasts** | Non gérés, mais une bibliothèque de podcasts peut quand même être choisie. | **Inutile**, mais masquer ces bibliothèques ou afficher « non pris en charge ». |
+| **Livres numériques, administration, envoi de fichiers, modification des métadonnées, Chromecast** | Absents de l'app Mac. | **Inutile** : le lien « Ouvrir dans le navigateur » suffit. |
+| **Ce que seule l'app Mac a** : téléchargements hors ligne, rester éveillé, mini-lecteur, adresse locale, lien `audiobookshelf://`, touches média, menu du Dock | — | **Garder** (en corrigeant la sécurité : S1, S3, S6). |
+| **Accessibilité du web** | Le web a 104 `aria-label`, de vraies fenêtres modales (`role="dialog"`, focus déplacé, Échap), et de vrais menus ARIA. Mais sa barre de progression est inaccessible, ses cartes n'ont pas de nom, et le ticket #2268 « Improve accessibility for screen readers » est toujours ouvert. | **Faire mieux qu'ABS.** Le web n'est pas un bon modèle d'accessibilité. |
+
+<!-- PROJETS -->
 
 ---
 
